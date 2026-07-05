@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>串口通信服务 - 调试面板</title>
+    <style>
+        :root {
+            --bg: #0f1923;
+            --panel: #1a2736;
+            --border: #2a3a4a;
+            --text: #cdd6e4;
+            --text-dim: #6b7d8e;
+            --accent: #4fc3f7;
+            --green: #69f0ae;
+            --red: #ff5252;
+            --yellow: #ffd740;
+            --input-bg: #0d1520;
+            --btn-bg: #1e3a5f;
+            --btn-hover: #2a5088;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', 'Consolas', 'Microsoft YaHei', monospace;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 16px;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 12px 20px;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--red);
+            display: inline-block;
+            animation: none;
+        }
+
+        .status-dot.connected {
+            background: var(--green);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.4;
+            }
+        }
+
+        .status-text {
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: auto auto;
+            gap: 16px;
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            padding: 10px 16px;
+            background: rgba(255, 255, 255, 0.03);
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-dim);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-body {
+            padding: 12px;
+        }
+
+        /* 串口列表 */
+        .port-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .port-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            margin-bottom: 6px;
+            font-size: 13px;
+            transition: background 0.15s;
+        }
+
+        .port-item:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .port-item.open {
+            border-color: var(--green);
+        }
+
+        .port-name {
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        .port-desc {
+            color: var(--text-dim);
+            font-size: 11px;
+            margin-left: 8px;
+        }
+
+        .btn {
+            padding: 5px 14px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--btn-bg);
+            color: var(--text);
+            cursor: pointer;
+            font-size: 12px;
+            font-family: inherit;
+            transition: all 0.15s;
+        }
+
+        .btn:hover {
+            background: var(--btn-hover);
+            border-color: var(--accent);
+        }
+
+        .btn:active {
+            transform: scale(0.97);
+        }
+
+        .btn-sm {
+            padding: 3px 10px;
+            font-size: 11px;
+        }
+
+        .btn-danger {
+            border-color: var(--red);
+            color: var(--red);
+        }
+
+        .btn-danger:hover {
+            background: rgba(255, 82, 82, 0.15);
+        }
+
+        .btn-accent {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        /* 表单 */
+        .form-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+            align-items: center;
+        }
+
+        .form-row label {
+            font-size: 12px;
+            color: var(--text-dim);
+            min-width: 50px;
+        }
+
+        select,
+        input {
+            background: var(--input-bg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text);
+            padding: 6px 10px;
+            font-size: 13px;
+            font-family: inherit;
+            outline: none;
+            flex: 1;
+        }
+
+        select:focus,
+        input:focus {
+            border-color: var(--accent);
+        }
+
+        /* 日志区 */
+        .log-area {
+            height: 250px;
+            overflow-y: auto;
+            font-size: 12px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            background: var(--input-bg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 10px;
+            line-height: 1.6;
+        }
+
+        .log-line {
+            padding: 2px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .log-time {
+            color: var(--text-dim);
+            margin-right: 8px;
+        }
+
+        .log-sent {
+            color: var(--accent);
+        }
+        .log-recv {
+            color: var(--green);
+        }
+        .log-error {
+            color: var(--red);
+        }
+        .log-info {
+            color: var(--yellow);
+        }
+
+        /* 全宽面板 */
+        .full-width {
+            grid-column: 1 / -1;
+        }
+
+        /* 消息输入区 */
+        .msg-input-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .msg-input-row input {
+            flex: 1;
+        }
+
+        .toggle-hex {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-dim);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .toggle-hex input {
+            accent-color: var(--accent);
+        }
+
+        /* 滚动条 */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+
+        .empty-state {
+            text-align: center;
+            color: var(--text-dim);
+            padding: 30px;
+            font-size: 13px;
+        }
+
+        @media (max-width: 900px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 头部 -->
+    <div class="header">
+        <h1>🔌 串口通信服务调试面板</h1>
+        <span class="status-dot" id="wsDot"></span>
+        <span class="status-text" id="wsStatus">WebSocket 未连接</span>
+        <span style="flex:1"></span>
+        <span class="status-text">端口: 9600</span>
+        <span class="status-text" id="clientCount">客户端: 0</span>
+    </div>
+
+    <!-- 主面板 -->
+    <div class="grid">
+        <!-- 串口列表 -->
+        <div class="panel">
+            <div class="panel-header">
+                <span>📡 可用串口</span>
+                <button class="btn btn-sm" onclick="refreshPorts()">刷新</button>
+            </div>
+            <div class="panel-body">
+                <div class="port-list" id="portList">
+                    <div class="empty-state">点击刷新获取串口列表...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 串口操作 -->
+        <div class="panel">
+            <div class="panel-header">
+                <span>⚙️ 串口操作</span>
+            </div>
+            <div class="panel-body">
+                <div class="form-row">
+                    <label>串口</label>
+                    <select id="targetPort">
+                        <option value="">-- 选择串口 --</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label>波特率</label>
+                    <select id="baudRate">
+                        <option value="9600" selected>9600</option>
+                        <option value="19200">19200</option>
+                        <option value="38400">38400</option>
+                        <option value="57600">57600</option>
+                        <option value="115200">115200</option>
+                        <option value="230400">230400</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <button class="btn btn-accent" onclick="openPort()">打开串口</button>
+                    <button class="btn btn-danger" onclick="closePort()">关闭串口</button>
+                </div>
+
+                <div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--border);">
+                    <div class="msg-input-row" style="margin-bottom:8px;">
+                        <input type="text" id="sendData" placeholder="输入要发送的数据..." onkeydown="if(event.key==='Enter')sendDataToPort()">
+                        <button class="btn" onclick="sendDataToPort()">发送</button>
+                    </div>
+                    <label class="toggle-hex">
+                        <input type="checkbox" id="hexMode">
+                        <span>HEX 模式 (如: A55A0102)</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- WebSocket 消息 -->
+        <div class="panel">
+            <div class="panel-header">
+                <span>💬 WebSocket 消息</span>
+                <button class="btn btn-sm" onclick="clearLogs()">清空</button>
+            </div>
+            <div class="panel-body">
+                <div class="log-area" id="wsLog">
+                    <div class="empty-state">等待 WebSocket 消息...</div>
+                </div>
+                <div class="msg-input-row" style="margin-top:8px;">
+                    <input type="text" id="wsMessage" placeholder="输入消息广播给所有客户端..." onkeydown="if(event.key==='Enter')sendWsMessage()">
+                    <button class="btn" onclick="sendWsMessage()">广播</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- REST API 测试 -->
+        <div class="panel">
+            <div class="panel-header">
+                <span>🔧 REST API 测试</span>
+            </div>
+            <div class="panel-body">
+                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px;">
+                    <button class="btn btn-sm" onclick="testApi('GET','/api/health')">GET /api/health</button>
+                    <button class="btn btn-sm" onclick="testApi('GET','/api/serial/ports')">GET /api/serial/ports</button>
+                    <button class="btn btn-sm" onclick="testApi('GET','/api/serial/opened')">GET /api/serial/opened</button>
+                    <button class="btn btn-sm" onclick="testApi('GET','/api/clients')">GET /api/clients</button>
+                    <button class="btn btn-sm" onclick="testApi('POST','/api/broadcast')">POST /api/broadcast</button>
+                </div>
+                <div class="log-area" id="apiLog">
+                    <div class="empty-state">点击按钮测试 API...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 已打开串口 -->
+        <div class="panel full-width">
+            <div class="panel-header">
+                <span>📋 串口通信日志</span>
+                <button class="btn btn-sm" onclick="clearSerialLogs()">清空</button>
+            </div>
+            <div class="panel-body">
+                <div class="log-area" id="serialLog" style="height:150px;">
+                    <div class="empty-state">串口收发日志将显示在此处...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        const WS_URL = API_BASE.replace(/^http/, 'ws') + '/ws';
+
+        // ---- WebSocket ----
+        let ws = null;
+
+        function connectWs() {
+            ws = new WebSocket(WS_URL);
+            ws.onopen = () => {
+                document.getElementById('wsDot').classList.add('connected');
+                document.getElementById('wsStatus').textContent = 'WebSocket 已连接';
+                appendWsLog('info', 'WebSocket 连接已建立');
+                refreshClientCount();
+            };
+            ws.onclose = () => {
+                document.getElementById('wsDot').classList.remove('connected');
+                document.getElementById('wsStatus').textContent = 'WebSocket 已断开 (3秒后重连)';
+                appendWsLog('error', 'WebSocket 连接已断开');
+                setTimeout(connectWs, 3000);
+            };
+            ws.onerror = () => {
+                appendWsLog('error', 'WebSocket 连接错误');
+            };
+            ws.onmessage = (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    if (data.type === 'echo') {
+                        appendWsLog('recv', `[${data.clientId}] ${data.message}`);
+                    } else if (data.type === 'broadcast') {
+                        appendWsLog('info', `[广播] ${data.message}`);
+                    } else if (data.type === 'serial-data') {
+                        appendSerialLog('recv', data.portName, data.data);
+                    } else {
+                        appendWsLog('recv', JSON.stringify(data));
+                    }
+                } catch {
+                    appendWsLog('recv', e.data);
+                }
+            };
+        }
+
+        function sendWsMessage() {
+            const input = document.getElementById('wsMessage');
+            const msg = input.value.trim();
+            if (!msg) return;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(msg);
+                appendWsLog('sent', msg);
+                input.value = '';
+            }
+        }
+
+        // ---- REST API ----
+        async function api(method, path, body) {
+            const opts = {
+                method,
+                headers: { 'Content-Type': 'application/json' }
+            };
+            if (body) opts.body = JSON.stringify(body);
+            const res = await fetch(API_BASE + path, opts);
+            const data = await res.json();
+            return { status: res.status, data };
+        }
+
+        async function testApi(method, path) {
+            const start = Date.now();
+            let body = null;
+            if (path === '/api/broadcast') {
+                body = { message: 'Hello from debug panel!' };
+            }
+            try {
+                const { status, data } = await api(method, path, body);
+                const elapsed = Date.now() - start;
+                appendApiLog('success', `${method} ${path} → ${status} (${elapsed}ms)`);
+                appendApiLog('info', JSON.stringify(data, null, 2));
+            } catch (err) {
+                appendApiLog('error', `${method} ${path} → 错误: ${err.message}`);
+            }
+        }
+
+        // ---- 串口操作 ----
+        async function refreshPorts() {
+            const { data } = await api('GET', '/api/serial/ports');
+            const list = document.getElementById('portList');
+            const select = document.getElementById('targetPort');
+
+            if (!data || data.length === 0) {
+                list.innerHTML = '<div class="empty-state">未检测到可用串口</div>';
+                return;
+            }
+
+            list.innerHTML = data.map(p => `
+            <div class="port-item ${p.isOpen ? 'open' : ''}">
+              <div>
+                <span class="port-name">${p.name}</span>
+                <span class="port-desc">${p.description || ''}</span>
+              </div>
+              <span style="font-size:11px; color:${p.isOpen ? 'var(--green)' : 'var(--text-dim)'}">
+                ${p.isOpen ? '已打开' : '未打开'}
+              </span>
+            </div>
+          `).join('');
+
+            select.innerHTML = '<option value="">-- 选择串口 --</option>' +
+                data.map(p => `<option value="${p.name}">${p.name} ${p.description ? '- ' + p.description : ''}</option>`).join('');
+        }
+
+        async function openPort() {
+            const port = document.getElementById('targetPort').value;
+            const baud = parseInt(document.getElementById('baudRate').value);
+            if (!port) { alert('请选择串口'); return; }
+
+            const { status, data } = await api('POST', '/api/serial/open', {
+                portName: port,
+                baudRate: baud
+            });
+
+            appendSerialLog(status === 200 ? 'info' : 'error', port,
+                status === 200 ? '打开成功' : (data.message || '打开失败'));
+            refreshPorts();
+        }
+
+        async function closePort() {
+            const port = document.getElementById('targetPort').value;
+            if (!port) { alert('请选择串口'); return; }
+
+            const { status, data } = await api('POST', '/api/serial/close', {
+                portName: port
+            });
+
+            appendSerialLog(status === 200 ? 'info' : 'error', port,
+                status === 200 ? '已关闭' : (data.message || '关闭失败'));
+            refreshPorts();
+        }
+
+        async function sendDataToPort() {
+            const port = document.getElementById('targetPort').value;
+            const data = document.getElementById('sendData').value.trim();
+            const hex = document.getElementById('hexMode').checked;
+            if (!port || !data) return;
+
+            const { status, data: resp } = await api('POST', '/api/serial/send', {
+                portName: port,
+                data: data,
+                hex: hex
+            });
+
+            appendSerialLog(status === 200 ? 'sent' : 'error', port,
+                status === 200 ? `发送: ${data}` : (resp.message || '发送失败'));
+            document.getElementById('sendData').value = '';
+        }
+
+        async function refreshClientCount() {
+            try {
+                const { data } = await api('GET', '/api/clients');
+                document.getElementById('clientCount').textContent = `客户端: ${data.count}`;
+            } catch { }
+        }
+
+        // ---- 日志 ----
+        function appendWsLog(type, msg) {
+            const el = document.getElementById('wsLog');
+            if (el.querySelector('.empty-state')) el.innerHTML = '';
+            const time = new Date().toLocaleTimeString();
+            el.innerHTML += `<div class="log-line"><span class="log-time">${time}</span><span class="log-${type}">${escapeHtml(msg)}</span></div>`;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function appendApiLog(type, msg) {
+            const el = document.getElementById('apiLog');
+            if (el.querySelector('.empty-state')) el.innerHTML = '';
+            const time = new Date().toLocaleTimeString();
+            el.innerHTML += `<div class="log-line"><span class="log-time">${time}</span><span class="log-${type === 'success' ? 'recv' : type}">${escapeHtml(msg)}</span></div>`;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function appendSerialLog(type, port, msg) {
+            const el = document.getElementById('serialLog');
+            if (el.querySelector('.empty-state')) el.innerHTML = '';
+            const time = new Date().toLocaleTimeString();
+            el.innerHTML +=
+                `<div class="log-line"><span class="log-time">${time}</span><span style="color:var(--accent)">[${port}]</span> <span class="log-${type}">${escapeHtml(msg)}</span></div>`;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function clearLogs() { document.getElementById('wsLog').innerHTML =
+                '<div class="empty-state">等待 WebSocket 消息...</div>'; }
+
+        function clearSerialLogs() { document.getElementById('serialLog').innerHTML =
+                '<div class="empty-state">串口收发日志将显示在此处...</div>'; }
+
+        function escapeHtml(s) {
+            const div = document.createElement('div');
+            div.textContent = s;
+            return div.innerHTML;
+        }
+
+        // ---- 初始化 ----
+        connectWs();
+        refreshPorts();
+        setInterval(refreshClientCount, 5000);
+    </script>
+</body>
+</html>

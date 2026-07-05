@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>串口配置调试工具</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --panel: #161b22;
+  --border: #30363d;
+  --text: #c9d1d9;
+  --text-dim: #8b949e;
+  --accent: #58a6ff;
+  --green: #3fb950;
+  --red: #f85149;
+  --yellow: #d29922;
+  --orange: #db6d28;
+  --input-bg: #0d1117;
+  --btn-bg: #21262d;
+  --btn-hover: #30363d;
+  --tab-active: #1f6feb;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  background: var(--bg); color: var(--text); min-height: 100vh; overflow: hidden;
+}
+
+/* ── 顶部栏 ── */
+.topbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
+  height: 44px;
+}
+.topbar h1 { font-size: 14px; font-weight: 600; white-space: nowrap; }
+.topbar .sep { width: 1px; height: 20px; background: var(--border); }
+.topbar .status { font-size: 11px; display: flex; align-items: center; gap: 6px; }
+.topbar .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
+.topbar .dot.on { background: var(--green); }
+.topbar .spacer { flex: 1; }
+.topbar .tab-btn {
+  padding: 4px 12px; border: 1px solid var(--border); border-radius: 4px;
+  background: transparent; color: var(--text-dim); cursor: pointer; font-size: 12px;
+}
+.topbar .tab-btn:hover { color: var(--text); }
+.topbar .tab-btn.active { background: var(--tab-active); color: #fff; border-color: var(--tab-active); }
+
+/* ── 主布局 ── */
+.layout { display: flex; height: calc(100vh - 44px); }
+
+/* ── 左侧配置面板 ── */
+.sidebar {
+  width: 320px; min-width: 320px; background: var(--panel);
+  border-right: 1px solid var(--border); overflow-y: auto; padding: 12px;
+}
+.sidebar-section {
+  margin-bottom: 16px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+}
+.sidebar-section .sec-title {
+  padding: 8px 12px; background: rgba(255,255,255,0.03); font-size: 12px;
+  font-weight: 600; color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: 0.5px; border-bottom: 1px solid var(--border);
+}
+.sidebar-section .sec-body { padding: 10px 12px; }
+
+.form-item {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+}
+.form-item:last-child { margin-bottom: 0; }
+.form-item label {
+  font-size: 11px; color: var(--text-dim); min-width: 52px; text-align: right;
+}
+.form-item select, .form-item input {
+  flex: 1; background: var(--input-bg); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text); padding: 5px 8px; font-size: 12px;
+  font-family: inherit; outline: none;
+}
+.form-item select:focus, .form-item input:focus { border-color: var(--accent); }
+.form-item select { cursor: pointer; }
+
+.btn-row { display: flex; gap: 6px; margin-top: 10px; }
+.btn {
+  padding: 5px 14px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--btn-bg); color: var(--text); cursor: pointer;
+  font-size: 12px; font-family: inherit; transition: all 0.15s;
+}
+.btn:hover { background: var(--btn-hover); }
+.btn:active { transform: scale(0.97); }
+.btn-primary { border-color: var(--accent); color: var(--accent); }
+.btn-primary:hover { background: rgba(88,166,255,0.1); }
+.btn-danger { border-color: var(--red); color: var(--red); }
+.btn-danger:hover { background: rgba(248,81,73,0.1); }
+.btn-success { border-color: var(--green); color: var(--green); }
+.btn-success:hover { background: rgba(63,185,80,0.1); }
+.btn-sm { padding: 3px 10px; font-size: 11px; }
+.btn-full { flex: 1; }
+
+/* 串口状态标签 */
+.port-status {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; padding: 2px 8px; border-radius: 10px;
+}
+.port-status.open { background: rgba(63,185,80,0.15); color: var(--green); }
+.port-status.closed { background: rgba(139,148,158,0.15); color: var(--text-dim); }
+
+/* ── 右侧主区域 ── */
+.main-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+/* 收发区 */
+.data-panel {
+  flex: 1; display: flex; flex-direction: column; min-height: 0;
+  margin: 10px 10px 0 10px;
+}
+.data-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 6px 6px 0 0;
+}
+.data-header .label { font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.data-header .counter { font-size: 10px; color: var(--text-dim); margin-left: auto; }
+
+.log-box {
+  flex: 1; min-height: 120px; overflow-y: auto; padding: 8px 12px;
+  background: var(--input-bg); border: 1px solid var(--border); border-top: none;
+  font-family: 'Consolas', 'Courier New', monospace; font-size: 12px;
+  line-height: 1.7;
+}
+.log-box.rx { border-radius: 0; border-bottom: none; }
+.log-box.tx { border-radius: 0 0 6px 6px; }
+
+.log-entry {
+  display: flex; gap: 8px; padding: 1px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.02);
+}
+.log-time { color: var(--text-dim); font-size: 10px; white-space: nowrap; min-width: 70px; }
+.log-tx { color: var(--accent); }
+.log-rx { color: var(--green); }
+.log-hex { color: var(--yellow); font-size: 10px; margin-left: 6px; }
+.log-error { color: var(--red); }
+.log-system { color: var(--text-dim); font-style: italic; }
+.log-raw { word-break: break-all; white-space: pre-wrap; }
+
+/* ── 发送栏 ── */
+.send-bar {
+  display: flex; gap: 8px; align-items: center;
+  padding: 8px 10px; background: var(--panel); border-top: 1px solid var(--border);
+  margin: 0 10px 8px 10px; border-radius: 6px;
+}
+.send-bar input {
+  flex: 1; background: var(--input-bg); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text); padding: 6px 10px;
+  font-size: 13px; font-family: 'Consolas', 'Courier New', monospace; outline: none;
+}
+.send-bar input:focus { border-color: var(--accent); }
+.send-options { display: flex; gap: 10px; align-items: center; font-size: 11px; color: var(--text-dim); }
+.send-options label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.send-options input[type=checkbox] { accent-color: var(--accent); }
+
+/* 追加模式 */
+.append-opts { display: flex; gap: 6px; align-items: center; }
+.append-opts select {
+  background: var(--input-bg); border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text); padding: 5px 8px; font-size: 11px; outline: none;
+}
+
+/* 定时发送 */
+.timer-row {
+  display: flex; gap: 8px; align-items: center; padding: 6px 10px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+  margin: 0 10px 8px 10px; font-size: 11px;
+}
+.timer-row input { width: 60px; }
+.timer-row label { color: var(--text-dim); }
+.timer-indicator { color: var(--orange); font-weight: 600; }
+
+/* 底部状态栏 */
+.statusbar {
+  display: flex; gap: 16px; align-items: center;
+  padding: 4px 16px; border-top: 1px solid var(--border);
+  font-size: 10px; color: var(--text-dim); height: 24px;
+}
+.statusbar span { display: flex; align-items: center; gap: 4px; }
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.empty-hint { text-align: center; color: var(--text-dim); padding: 20px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<!-- 顶部栏 -->
+<div class="topbar">
+  <h1>串口配置调试工具</h1>
+  <div class="sep"></div>
+  <div class="status">
+    <span class="dot" id="serviceDot"></span>
+    <span id="serviceStatus">检测中...</span>
+  </div>
+  <div class="sep"></div>
+  <div class="status">
+    <span class="dot" id="portDot"></span>
+    <span id="portStatus">未打开串口</span>
+  </div>
+  <div class="spacer"></div>
+  <button class="tab-btn active" id="tabSerial" onclick="switchTab('serial')">串口调试</button>
+  <button class="tab-btn" id="tabApi" onclick="switchTab('api')">API 测试</button>
+</div>
+
+<!-- 主布局 -->
+<div class="layout">
+
+  <!-- 左侧配置 -->
+  <div class="sidebar" id="serialConfig">
+    <!-- 串口选择 -->
+    <div class="sidebar-section">
+      <div class="sec-title">串口选择</div>
+      <div class="sec-body">
+        <div class="form-item">
+          <label>端口</label>
+          <select id="selPort" onchange="onPortSelect()">
+            <option value="">-- 请选择 --</option>
+          </select>
+          <button class="btn btn-sm" onclick="refreshPorts()" title="刷新串口列表">↻</button>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-full" id="btnOpen" onclick="togglePort()">打开串口</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 串口参数 -->
+    <div class="sidebar-section">
+      <div class="sec-title">串口参数</div>
+      <div class="sec-body">
+        <div class="form-item">
+          <label>波特率</label>
+          <select id="baudRate">
+            <option value="300">300</option>
+            <option value="600">600</option>
+            <option value="1200">1200</option>
+            <option value="2400">2400</option>
+            <option value="4800">4800</option>
+            <option value="9600" selected>9600</option>
+            <option value="14400">14400</option>
+            <option value="19200">19200</option>
+            <option value="38400">38400</option>
+            <option value="56000">56000</option>
+            <option value="57600">57600</option>
+            <option value="115200">115200</option>
+            <option value="128000">128000</option>
+            <option value="230400">230400</option>
+            <option value="256000">256000</option>
+            <option value="460800">460800</option>
+            <option value="921600">921600</option>
+          </select>
+        </div>
+        <div class="form-item">
+          <label>数据位</label>
+          <select id="dataBits">
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8" selected>8</option>
+          </select>
+        </div>
+        <div class="form-item">
+          <label>停止位</label>
+          <select id="stopBits">
+            <option value="One" selected>1</option>
+            <option value="Two">2</option>
+            <option value="OnePointFive">1.5</option>
+          </select>
+        </div>
+        <div class="form-item">
+          <label>校验位</label>
+          <select id="parity">
+            <option value="None" selected>None</option>
+            <option value="Odd">Odd</option>
+            <option value="Even">Even</option>
+            <option value="Mark">Mark</option>
+            <option value="Space">Space</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- 发送设置 -->
+    <div class="sidebar-section">
+      <div class="sec-title">发送设置</div>
+      <div class="sec-body">
+        <div class="form-item">
+          <label>模式</label>
+          <select id="sendMode">
+            <option value="ascii" selected>ASCII 文本</option>
+            <option value="hex">HEX 十六进制</option>
+          </select>
+        </div>
+        <div class="form-item">
+          <label>追加</label>
+          <div class="append-opts">
+            <select id="appendType">
+              <option value="none" selected>无</option>
+              <option value="rn">\\r\\n (CRLF)</option>
+              <option value="r">\\r (CR)</option>
+              <option value="n">\\n (LF)</option>
+              <option value="hex">自定义 HEX</option>
+            </select>
+            <input type="text" id="appendHex" placeholder="如: 0D0A" style="width:70px;display:none;">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 定时发送 -->
+    <div class="sidebar-section">
+      <div class="sec-title">定时发送</div>
+      <div class="sec-body">
+        <div class="form-item">
+          <label>间隔(ms)</label>
+          <input type="number" id="timerInterval" value="1000" min="100" max="60000" step="100">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-success btn-full" id="btnTimer" onclick="toggleTimer()">▶ 开始定时发送</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- API 测试面板（默认隐藏） -->
+  <div class="sidebar" id="apiConfig" style="display:none;">
+    <div class="sidebar-section">
+      <div class="sec-title">REST API</div>
+      <div class="sec-body">
+        <div style="display:flex; flex-direction:column; gap:5px;">
+          <button class="btn btn-sm" onclick="apiTest('GET','/api/health')">GET /api/health</button>
+          <button class="btn btn-sm" onclick="apiTest('GET','/api/serial/ports')">GET /api/serial/ports</button>
+          <button class="btn btn-sm" onclick="apiTest('GET','/api/serial/opened')">GET /api/serial/opened</button>
+          <button class="btn btn-sm" onclick="apiTest('GET','/api/clients')">GET /api/clients</button>
+        </div>
+        <div style="margin-top:10px;">
+          <textarea id="apiBody" placeholder='POST body JSON...' style="width:100%;height:60px;background:var(--input-bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:6px;font-size:11px;font-family:Consolas,monospace;resize:vertical;"></textarea>
+          <button class="btn btn-sm" style="margin-top:6px;" onclick="apiTest('POST','/api/serial/open')">POST /api/serial/open</button>
+          <button class="btn btn-sm" style="margin-top:4px;" onclick="apiTest('POST','/api/serial/send')">POST /api/serial/send</button>
+          <button class="btn btn-sm" style="margin-top:4px;" onclick="apiTest('POST','/api/broadcast')">POST /api/broadcast</button>
+        </div>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sec-title">WebSocket</div>
+      <div class="sec-body">
+        <div class="form-item">
+          <label>消息</label>
+          <input type="text" id="wsMsg" placeholder="输入消息广播...">
+        </div>
+        <button class="btn btn-sm btn-full" onclick="sendWsMessage()">广播消息</button>
+        <div class="status" style="margin-top:8px;">
+          <span class="dot" id="wsDot"></span>
+          <span style="font-size:11px;" id="wsStatusText">未连接</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右侧主区域 -->
+  <div class="main-area" id="mainSerial">
+    <!-- 接收区 -->
+    <div class="data-panel" style="flex:3;">
+      <div class="data-header">
+        <span class="label">📥 接收数据 (RX)</span>
+        <span class="counter" id="rxCount">0 字节</span>
+        <span style="font-size:10px; color:var(--text-dim);">
+          <label style="cursor:pointer;display:flex;align-items:center;gap:3px;">
+            <input type="checkbox" id="showHexRx" checked onchange="renderRxLog()"> HEX
+          </label>
+        </span>
+        <button class="btn btn-sm" onclick="clearRxLog()">清空</button>
+      </div>
+      <div class="log-box rx" id="rxLog"><div class="empty-hint">等待接收数据...</div></div>
+    </div>
+
+    <!-- 发送区 -->
+    <div class="data-panel" style="flex:2;">
+      <div class="data-header">
+        <span class="label">📤 发送数据 (TX)</span>
+        <span class="counter" id="txCount">0 字节</span>
+        <span style="font-size:10px; color:var(--text-dim);">
+          <label style="cursor:pointer;display:flex;align-items:center;gap:3px;">
+            <input type="checkbox" id="showHexTx" checked onchange="renderTxLog()"> HEX
+          </label>
+        </span>
+        <button class="btn btn-sm" onclick="clearTxLog()">清空</button>
+      </div>
+      <div class="log-box tx" id="txLog"><div class="empty-hint">发送数据将显示在此处...</div></div>
+    </div>
+
+    <!-- 发送栏 -->
+    <div class="send-bar">
+      <input type="text" id="sendInput" placeholder="输入要发送的数据... (Enter 发送)" onkeydown="if(event.key==='Enter')sendData()">
+      <button class="btn btn-primary" onclick="sendData()">发送</button>
+    </div>
+  </div>
+
+  <!-- API 测试主区域 -->
+  <div class="main-area" id="mainApi" style="display:none;">
+    <div class="data-panel">
+      <div class="data-header">
+        <span class="label">API / WebSocket 日志</span>
+        <button class="btn btn-sm" onclick="document.getElementById('apiLogBox').innerHTML=''">清空</button>
+      </div>
+      <div class="log-box" id="apiLogBox" style="border-radius:0 0 6px 6px; border:1px solid var(--border);">
+        <div class="empty-hint">API 调用结果将显示在此处...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 底部状态栏 -->
+<div class="statusbar">
+  <span>服务: <b id="srvAddr">http://localhost:9600</b></span>
+  <span>TX: <b id="totalTx">0</b></span>
+  <span>RX: <b id="totalRx">0</b></span>
+  <span>定时: <b id="timerState">关闭</b></span>
+  <span style="margin-left:auto;">v1.0</span>
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+const WS_URL = API_BASE.replace(/^http/, 'ws') + '/ws';
+
+// ── 状态 ──
+let currentPort = '';
+let portOpened = false;
+let rxTotal = 0, txTotal = 0;
+let rxLog = [], txLog = [];
+let timerId = null;
+let ws = null;
+const MAX_LOG = 500;
+
+// ── DOM 引用 ──
+const $ = id => document.getElementById(id);
+
+// ── 初始化 ──
+async function init() {
+  connectWs();
+  await checkHealth();
+  await refreshPorts();
+  document.getElementById('appendType').addEventListener('change', onAppendTypeChange);
+}
+init();
+
+// ── 标签切换 ──
+function switchTab(tab) {
+  const isSerial = tab === 'serial';
+  $('tabSerial').classList.toggle('active', isSerial);
+  $('tabApi').classList.toggle('active', !isSerial);
+  $('serialConfig').style.display = isSerial ? '' : 'none';
+  $('apiConfig').style.display = isSerial ? 'none' : '';
+  $('mainSerial').style.display = isSerial ? '' : 'none';
+  $('mainApi').style.display = isSerial ? 'none' : '';
+}
+
+// ── WebSocket ──
+function connectWs() {
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    $('wsDot').className = 'dot on';
+    $('wsStatusText').textContent = '已连接';
+  };
+  ws.onclose = () => {
+    $('wsDot').className = 'dot';
+    $('wsStatusText').textContent = '断开 (3s重连)';
+    setTimeout(connectWs, 3000);
+  };
+  ws.onerror = () => {};
+  ws.onmessage = (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.type === 'echo') {
+        appendApiLog('recv', `[${d.clientId}] ${d.message}`);
+      }
+    } catch { appendApiLog('recv', e.data); }
+  };
+}
+function sendWsMessage() {
+  const msg = $('wsMsg').value.trim();
+  if (!msg || !ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(msg);
+  appendApiLog('sent', msg);
+  $('wsMsg').value = '';
+}
+
+// ── 健康检查 ──
+async function checkHealth() {
+  try {
+    const res = await fetch(API_BASE + '/api/health');
+    if (res.ok) {
+      $('serviceDot').className = 'dot on';
+      $('serviceStatus').textContent = '服务正常';
+      $('srvAddr').textContent = API_BASE;
+    }
+  } catch {
+    $('serviceDot').className = 'dot';
+    $('serviceStatus').textContent = '服务离线';
+  }
+}
+
+// ── 串口列表 ──
+async function refreshPorts() {
+  try {
+    const res = await fetch(API_BASE + '/api/serial/ports');
+    const data = await res.json();
+    const sel = $('selPort');
+    sel.innerHTML = '<option value="">-- 请选择 --</option>';
+    if (Array.isArray(data)) {
+      data.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.name;
+        opt.textContent = `${p.name}${p.description ? ' - ' + p.description : ''}${p.isOpen ? ' [已打开]' : ''}`;
+        if (p.isOpen) opt.style.color = 'var(--green)';
+        sel.appendChild(opt);
+      });
+    }
+    // 如果当前端口仍在列表中
+    if (currentPort && data.some(p => p.name === currentPort && p.isOpen)) {
+      sel.value = currentPort;
+      setPortOpened(true);
+    }
+  } catch (e) {
+    appendRxLog('error', '获取串口列表失败: ' + e.message);
+  }
+}
+
+function onPortSelect() {
+  const port = $('selPort').value;
+  if (port !== currentPort && portOpened) {
+    // 切换前先关旧串口
+    closePortSilent(currentPort);
+    setPortOpened(false);
+  }
+  currentPort = port;
+}
+
+// ── 打开/关闭串口 ──
+async function togglePort() {
+  if (portOpened) {
+    await closePort();
+  } else {
+    await openPort();
+  }
+}
+
+async function openPort() {
+  const port = $('selPort').value;
+  if (!port) { alert('请先选择串口'); return; }
+
+  const body = {
+    portName: port,
+    baudRate: parseInt($('baudRate').value),
+    dataBits: parseInt($('dataBits').value),
+    stopBits: $('stopBits').value,
+    parity: $('parity').value
+  };
+
+  try {
+    const res = await fetch(API_BASE + '/api/serial/open', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (res.ok) {
+      currentPort = port;
+      setPortOpened(true);
+      appendRxLog('system', `串口 ${port} 打开成功 (${body.baudRate},${body.dataBits},${body.stopBits},${body.parity})`);
+      startPolling();
+    } else {
+      appendRxLog('error', `打开失败: ${data.message}`);
+    }
+  } catch (e) {
+    appendRxLog('error', '打开串口异常: ' + e.message);
+  }
+}
+
+async function closePort() {
+  await closePortSilent(currentPort);
+  setPortOpened(false);
+  stopPolling();
+}
+
+async function closePortSilent(port) {
+  if (!port) return;
+  try {
+    await fetch(API_BASE + '/api/serial/close', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ portName: port })
+    });
+    appendRxLog('system', `串口 ${port} 已关闭`);
+  } catch {}
+}
+
+function setPortOpened(opened) {
+  portOpened = opened;
+  $('btnOpen').textContent = opened ? '关闭串口' : '打开串口';
+  $('btnOpen').className = opened ? 'btn btn-danger btn-full' : 'btn btn-primary btn-full';
+  $('portDot').className = opened ? 'dot on' : 'dot';
+  $('portStatus').textContent = opened ? `${currentPort} 已连接` : '未打开串口';
+}
+
+// ── 数据轮询 ──
+let pollTimer = null;
+function startPolling() {
+  stopPolling();
+  pollTimer = setInterval(pollData, 100);
+}
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+async function pollData() {
+  if (!currentPort || !portOpened) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/serial/read?portName=${encodeURIComponent(currentPort)}`);
+    const data = await res.json();
+    if (data.success && data.data) {
+      appendRxLog('rx', data.data, data.hex);
+    }
+  } catch {}
+}
+
+// ── 发送数据 ──
+async function sendData() {
+  const input = $('sendInput');
+  let raw = input.value;
+  if (!raw || !currentPort || !portOpened) return;
+
+  const mode = $('sendMode').value;
+  const append = $('appendType').value;
+  let hex = false;
+  let dataToSend = raw;
+
+  if (mode === 'hex') {
+    // HEX 模式：去掉空格
+    dataToSend = raw.replace(/\s+/g, '');
+    hex = true;
+  }
+
+  // 追加后缀
+  if (append !== 'none') {
+    let suffix = '';
+    switch (append) {
+      case 'rn': suffix = '\\r\\n'; break;
+      case 'r': suffix = '\\r'; break;
+      case 'n': suffix = '\\n'; break;
+      case 'hex': {
+        const hexSuffix = $('appendHex').value.replace(/\s+/g, '');
+        if (hexSuffix) {
+          // 如果主数据是 HEX，后缀也用 HEX 拼接
+          dataToSend += hexSuffix;
+        }
+        break;
+      }
+    }
+    if (append !== 'hex') {
+      if (hex) {
+        // ASCII 后缀转 HEX
+        const suffixHex = [...unescapeStr(suffix)].map(c => c.charCodeAt(0).toString(16).padStart(2, '0').toUpperCase()).join('');
+        dataToSend += suffixHex;
+      } else {
+        dataToSend += suffix;
+      }
+    }
+  }
+
+  try {
+    const res = await fetch(API_BASE + '/api/serial/send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ portName: currentPort, data: dataToSend, hex: hex })
+    });
+    const resp = await res.json();
+    if (res.ok) {
+      const hexDisplay = hex ? dataToSend : [...dataToSend].map(c => c.charCodeAt(0).toString(16).padStart(2, '0').toUpperCase()).join(' ');
+      appendTxLog(dataToSend, hexDisplay);
+      input.value = '';
+    } else {
+      appendTxLog('发送失败: ' + resp.message, '', 'error');
+    }
+  } catch (e) {
+    appendTxLog('发送异常: ' + e.message, '', 'error');
+  }
+}
+
+function unescapeStr(s) {
+  return s.replace(/\\r/g, '\r').replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+}
+
+// ── 定时发送 ──
+function toggleTimer() {
+  if (timerId) {
+    clearInterval(timerId);
+    timerId = null;
+    $('btnTimer').textContent = '▶ 开始定时发送';
+    $('btnTimer').className = 'btn btn-success btn-full';
+    $('timerState').textContent = '关闭';
+  } else {
+    const interval = parseInt($('timerInterval').value) || 1000;
+    if (!$('sendInput').value.trim()) {
+      alert('请先在发送栏输入数据');
+      return;
+    }
+    if (!currentPort || !portOpened) {
+      alert('请先打开串口');
+      return;
+    }
+    timerId = setInterval(sendData, interval);
+    $('btnTimer').textContent = '⏸ 停止定时发送';
+    $('btnTimer').className = 'btn btn-danger btn-full';
+    $('timerState').textContent = `运行中 (${interval}ms)`;
+    appendRxLog('system', `定时发送已启动 (间隔 ${interval}ms)`);
+  }
+}
+
+// ── 追加模式切换 ──
+function onAppendTypeChange() {
+  $('appendHex').style.display = $('appendType').value === 'hex' ? '' : 'none';
+}
+
+// ── 日志渲染 ──
+function appendRxLog(type, text, hex) {
+  const entry = { time: new Date().toLocaleTimeString('zh-CN', { hour12: false }), type, text, hex };
+  rxLog.push(entry);
+  if (rxLog.length > MAX_LOG) rxLog.shift();
+  if (type === 'rx') rxTotal += text.length;
+  $('rxCount').textContent = formatBytes(rxTotal);
+  $('totalRx').textContent = rxTotal;
+  renderRxLog();
+}
+
+function appendTxLog(text, hex, type = 'tx') {
+  const entry = { time: new Date().toLocaleTimeString('zh-CN', { hour12: false }), type, text, hex };
+  txLog.push(entry);
+  if (txLog.length > MAX_LOG) txLog.shift();
+  if (type === 'tx') txTotal += text.length;
+  $('txCount').textContent = formatBytes(txTotal);
+  $('totalTx').textContent = txTotal;
+  renderTxLog();
+}
+
+function renderRxLog() {
+  const showHex = $('showHexRx').checked;
+  const el = $('rxLog');
+  if (rxLog.length === 0) { el.innerHTML = '<div class="empty-hint">等待接收数据...</div>'; return; }
+  el.innerHTML = rxLog.map(e => {
+    let cls = 'log-' + (e.type === 'rx' ? 'rx' : e.type === 'error' ? 'error' : 'system');
+    let hexPart = showHex && e.hex ? `<span class="log-hex">[${e.hex}]</span>` : '';
+    return `<div class="log-entry"><span class="log-time">${e.time}</span><span class="${cls} log-raw">${esc(e.text)}</span>${hexPart}</div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function renderTxLog() {
+  const showHex = $('showHexTx').checked;
+  const el = $('txLog');
+  if (txLog.length === 0) { el.innerHTML = '<div class="empty-hint">发送数据将显示在此处...</div>'; return; }
+  el.innerHTML = txLog.map(e => {
+    let cls = 'log-' + (e.type === 'tx' ? 'tx' : 'error');
+    let hexPart = showHex && e.hex ? `<span class="log-hex">[${e.hex}]</span>` : '';
+    return `<div class="log-entry"><span class="log-time">${e.time}</span><span class="${cls} log-raw">${esc(e.text)}</span>${hexPart}</div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearRxLog() { rxLog = []; rxTotal = 0; $('rxCount').textContent='0 字节'; $('totalRx').textContent='0'; renderRxLog(); }
+function clearTxLog() { txLog = []; txTotal = 0; $('txCount').textContent='0 字节'; $('totalTx').textContent='0'; renderTxLog(); }
+
+// ── API 测试 ──
+function appendApiLog(type, msg) {
+  const el = $('apiLogBox');
+  if (el.querySelector('.empty-hint')) el.innerHTML = '';
+  const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  const cls = type === 'sent' ? 'log-tx' : type === 'recv' ? 'log-rx' : type === 'error' ? 'log-error' : 'log-system';
+  el.innerHTML += `<div class="log-entry"><span class="log-time">${time}</span><span class="${cls} log-raw">${esc(msg)}</span></div>`;
+  el.scrollTop = el.scrollHeight;
+}
+
+async function apiTest(method, path) {
+  const start = Date.now();
+  let body = null;
+  const bodyText = $('apiBody').value.trim();
+  if (method === 'POST' && bodyText) {
+    try { body = JSON.parse(bodyText); } catch { body = { message: bodyText }; }
+  } else if (method === 'POST') {
+    body = { portName: currentPort || 'COM1', baudRate: 9600 };
+  }
+  try {
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body) opts.body = JSON.stringify(body);
+    const res = await fetch(API_BASE + path, opts);
+    const data = await res.json();
+    appendApiLog('recv', `${method} ${path} → ${res.status} (${Date.now()-start}ms)`);
+    appendApiLog('recv', JSON.stringify(data, null, 2));
+  } catch (e) {
+    appendApiLog('error', `${method} ${path} → ${e.message}`);
+  }
+}
+
+// ── 工具 ──
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+function formatBytes(b) {
+  if (b < 1024) return b + ' 字节';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  return (b / 1048576).toFixed(1) + ' MB';
+}
+</script>
+</body>
+</html>

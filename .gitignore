@@ -1,0 +1,19 @@
+# Build output
+bin/
+obj/
+publish/
+*.zip
+*.7z
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vs/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
