@@ -20,6 +20,14 @@ public class Program
 {
     public static async Task Main(string[] args)
     {
+        // 控制台标题和启动提示
+        Console.Title = "SerialPortService v1.0.0";
+        Console.WriteLine("╔════════════════════════════════════════════╗");
+        Console.WriteLine("║   SerialPortService - 串口通信服务        ║");
+        Console.WriteLine("║   WebSocket + RESTful API                 ║");
+        Console.WriteLine("╚════════════════════════════════════════════╝");
+        Console.WriteLine();
+
         // ---- 处理命令行：安装/卸载/启停 Windows 服务 ----
         if (args.Length > 0)
         {
@@ -87,11 +95,14 @@ public class Program
             });
         });
 
-        // Windows 服务支持
-        builder.Host.UseWindowsService(options =>
+        // Windows 服务支持（仅服务模式下启用，控制台模式跳过避免崩溃）
+        if (!Environment.UserInteractive)
         {
-            options.ServiceName = "SerialPortService";
-        });
+            builder.Host.UseWindowsService(options =>
+            {
+                options.ServiceName = "SerialPortService";
+            });
+        }
 
         builder.WebHost.UseUrls(urls);
 
@@ -112,6 +123,9 @@ public class Program
         RegisterRoutes(app, wsBufferSize);
 
         Log.Information("SerialPortService 启动完成，监听地址: {Urls}", urls);
+        Console.WriteLine($"✓ 服务已启动，监听地址: {urls}");
+        Console.WriteLine("  按 Ctrl+C 停止服务");
+        Console.WriteLine();
         await app.RunAsync();
     }
 
@@ -122,6 +136,7 @@ public class Program
     {
         lifetime.ApplicationStopping.Register(() =>
         {
+            Console.WriteLine("收到停止信号，正在优雅关闭...");
             Log.Information("收到停止信号，开始优雅关闭...");
 
             try
