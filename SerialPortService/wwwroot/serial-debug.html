@@ -315,6 +315,31 @@ body {
       </div>
     </div>
 
+    <!-- 接收设置 -->
+    <div class="sidebar-section">
+      <div class="sec-title">接收设置</div>
+      <div class="sec-body">
+        <div class="btn-row">
+          <button class="btn btn-success btn-sm" onclick="receiveOnce()" title="从串口缓冲区读取一次数据">📥 接收一次</button>
+          <button class="btn btn-sm" onclick="clearRxLog()">清空</button>
+        </div>
+        <div style="margin-top:10px; padding-top:8px; border-top:1px solid var(--border);">
+          <div style="font-size:11px; color:var(--text-dim); margin-bottom:6px;">持续性接收</div>
+          <div style="display:flex; gap:4px; margin-bottom:6px;">
+            <button class="btn btn-sm btn-full" id="btnPolling" onclick="togglePolling()">▶ HTTP 轮询</button>
+          </div>
+          <div class="form-item" id="pollOpts" style="display:none;">
+            <label>间隔(ms)</label>
+            <input type="number" id="pollInterval" value="200" min="50" max="5000" step="50">
+          </div>
+          <div style="display:flex; gap:4px; margin-bottom:6px;">
+            <button class="btn btn-sm btn-full" id="btnWsReceive" onclick="toggleWsReceive()" style="color:var(--accent);border-color:var(--accent);">● WebSocket 实时推送</button>
+          </div>
+          <div id="receiveStatus" style="font-size:10px; color:var(--text-dim);">接收: 空闲</div>
+        </div>
+      </div>
+    </div>
+
     <!-- 定时发送 -->
     <div class="sidebar-section">
       <div class="sec-title">定时发送</div>
@@ -423,6 +448,7 @@ body {
   <span>服务: <b id="srvAddr">http://localhost:9600</b></span>
   <span>TX: <b id="totalTx">0</b></span>
   <span>RX: <b id="totalRx">0</b></span>
+  <span>接收: <b id="recvState">空闲</b></span>
   <span>定时: <b id="timerState">关闭</b></span>
   <span style="margin-left:auto;">v1.0</span>
 </div>
@@ -479,8 +505,16 @@ function connectWs() {
   ws.onmessage = (e) => {
     try {
       const d = JSON.parse(e.data);
-      if (d.type === 'echo') {
+      if (d.type === 'serial-data') {
+        // 实时串口数据 — 推送到 RX 日志
+        const decoded = atob(d.data);
+        appendRxLog('rx', decoded, d.hex, d.byteCount);
+      } else if (d.type === 'echo') {
         appendApiLog('recv', `[${d.clientId}] ${d.message}`);
+      } else if (d.type === 'subscribed' || d.type === 'unsubscribed') {
+        appendApiLog('recv', d.message);
+      } else if (d.type === 'error') {
+        appendApiLog('error', d.message);
       }
     } catch { appendApiLog('recv', e.data); }
   };
@@ -575,7 +609,10 @@ async function openPort() {
       currentPort = port;
       setPortOpened(true);
       appendRxLog('system', `串口 ${port} 打开成功 (${body.baudRate},${body.dataBits},${body.stopBits},${body.parity})`);
-      startPolling();
+      // WebSocket 订阅（仅在手动开启时）
+      if (wsReceiveActive && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'subscribe', port: port }));
+      }
     } else {
       appendRxLog('error', `打开失败: ${data.message}`);
     }
@@ -585,9 +622,14 @@ async function openPort() {
 }
 
 async function closePort() {
+  // 停止轮询
+  if (pollTimer) stopPollReceive();
+  // WebSocket 取消订阅
+  if (ws && ws.readyState === WebSocket.OPEN && currentPort) {
+    ws.send(JSON.stringify({ action: 'unsubscribe', port: currentPort }));
+  }
   await closePortSilent(currentPort);
   setPortOpened(false);
-  stopPolling();
 }
 
 async function closePortSilent(port) {
@@ -607,26 +649,6 @@ function setPortOpened(opened) {
   $('btnOpen').className = opened ? 'btn btn-danger btn-full' : 'btn btn-primary btn-full';
   $('portDot').className = opened ? 'dot on' : 'dot';
   $('portStatus').textContent = opened ? `${currentPort} 已连接` : '未打开串口';
-}
-
-// ── 数据轮询 ──
-let pollTimer = null;
-function startPolling() {
-  stopPolling();
-  pollTimer = setInterval(pollData, 100);
-}
-function stopPolling() {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-}
-async function pollData() {
-  if (!currentPort || !portOpened) return;
-  try {
-    const res = await fetch(`${API_BASE}/api/serial/read?portName=${encodeURIComponent(currentPort)}`);
-    const data = await res.json();
-    if (data.success && data.data) {
-      appendRxLog('rx', data.data, data.hex);
-    }
-  } catch {}
 }
 
 // ── 发送数据 ──
@@ -727,11 +749,11 @@ function onAppendTypeChange() {
 }
 
 // ── 日志渲染 ──
-function appendRxLog(type, text, hex) {
+function appendRxLog(type, text, hex, byteCount) {
   const entry = { time: new Date().toLocaleTimeString('zh-CN', { hour12: false }), type, text, hex };
   rxLog.push(entry);
   if (rxLog.length > MAX_LOG) rxLog.shift();
-  if (type === 'rx') rxTotal += text.length;
+  if (type === 'rx') rxTotal += (byteCount || text.length);
   $('rxCount').textContent = formatBytes(rxTotal);
   $('totalRx').textContent = rxTotal;
   renderRxLog();
@@ -773,6 +795,116 @@ function renderTxLog() {
 
 function clearRxLog() { rxLog = []; rxTotal = 0; $('rxCount').textContent='0 字节'; $('totalRx').textContent='0'; renderRxLog(); }
 function clearTxLog() { txLog = []; txTotal = 0; $('txCount').textContent='0 字节'; $('totalTx').textContent='0'; renderTxLog(); }
+
+// ── 接收控制 ──
+let pollTimer = null;
+let wsReceiveActive = false; // 独立于端口订阅的 WebSocket 接收开关
+
+// 一次性接收
+async function receiveOnce() {
+  if (!currentPort || !portOpened) { alert('请先打开串口'); return; }
+  const btn = $('btnReceiveOnce');
+  btn.disabled = true;
+  btn.textContent = '读取中...';
+  try {
+    const res = await fetch(`${API_BASE}/api/serial/read?portName=${encodeURIComponent(currentPort)}`);
+    const data = await res.json();
+    if (data.success && data.byteCount > 0) {
+      const decoded = atob(data.data);
+      appendRxLog('rx', decoded, data.hex, data.byteCount);
+    } else if (data.success) {
+      appendRxLog('system', '缓冲区暂无数据');
+    } else {
+      appendRxLog('error', '读取错误: ' + (data.message || '未知'));
+    }
+  } catch (e) {
+    appendRxLog('error', '接收异常: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📥 接收一次';
+  }
+}
+
+// HTTP 轮询接收
+function togglePolling() {
+  if (pollTimer) {
+    stopPollReceive();
+    return;
+  }
+  if (!currentPort || !portOpened) { alert('请先打开串口'); return; }
+  startPollReceive();
+}
+
+function startPollReceive() {
+  const interval = parseInt($('pollInterval').value) || 200;
+  pollTimer = setInterval(pollOnce, interval);
+  $('btnPolling').textContent = '⏸ 停止轮询';
+  $('btnPolling').className = 'btn btn-sm btn-full btn-danger';
+  $('pollOpts').style.display = '';
+  updateReceiveStatus();
+  appendRxLog('system', `HTTP 轮询已启动 (间隔 ${interval}ms)`);
+}
+
+function stopPollReceive() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  $('btnPolling').textContent = '▶ HTTP 轮询';
+  $('btnPolling').className = 'btn btn-sm btn-full';
+  $('pollOpts').style.display = 'none';
+  updateReceiveStatus();
+  appendRxLog('system', 'HTTP 轮询已停止');
+}
+
+async function pollOnce() {
+  if (!currentPort || !portOpened) { stopPollReceive(); return; }
+  try {
+    const res = await fetch(`${API_BASE}/api/serial/read?portName=${encodeURIComponent(currentPort)}`);
+    const data = await res.json();
+    if (data.success && data.byteCount > 0) {
+      const decoded = atob(data.data);
+      appendRxLog('rx', decoded, data.hex, data.byteCount);
+    }
+  } catch { /* 忽略轮询错误 */ }
+}
+
+// WebSocket 实时接收开关
+function toggleWsReceive() {
+  if (!portOpened || !currentPort) { alert('请先打开串口'); return; }
+  if (!ws || ws.readyState !== WebSocket.OPEN) { alert('WebSocket 未连接'); return; }
+
+  if (wsReceiveActive) {
+    // 取消订阅
+    ws.send(JSON.stringify({ action: 'unsubscribe', port: currentPort }));
+    wsReceiveActive = false;
+    appendRxLog('system', `已取消 WebSocket 订阅 ${currentPort}`);
+  } else {
+    // 订阅
+    ws.send(JSON.stringify({ action: 'subscribe', port: currentPort }));
+    wsReceiveActive = true;
+    appendRxLog('system', `已启用 WebSocket 实时接收 ${currentPort}`);
+  }
+  updateReceiveStatus();
+}
+
+function updateReceiveStatus() {
+  const statusEl = $('receiveStatus');
+  const stateEl = $('recvState');
+  if (pollTimer && wsReceiveActive) {
+    statusEl.textContent = '接收: 轮询 + WebSocket';
+    stateEl.textContent = '双模式';
+  } else if (pollTimer) {
+    statusEl.textContent = `接收: HTTP 轮询中`;
+    stateEl.textContent = `轮询`;
+  } else if (wsReceiveActive) {
+    statusEl.textContent = `接收: WebSocket 实时`;
+    stateEl.textContent = `WS`;
+  } else {
+    statusEl.textContent = '接收: 空闲';
+    stateEl.textContent = '空闲';
+  }
+  $('btnWsReceive').textContent = wsReceiveActive ? '● WebSocket 接收中' : '● WebSocket 实时推送';
+  $('btnWsReceive').style.color = wsReceiveActive ? 'var(--green)' : 'var(--accent)';
+  $('btnWsReceive').style.borderColor = wsReceiveActive ? 'var(--green)' : 'var(--accent)';
+}
 
 // ── API 测试 ──
 function appendApiLog(type, msg) {

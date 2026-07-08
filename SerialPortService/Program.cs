@@ -263,10 +263,24 @@ public class Program
         });
 
         // 打开串口
-        app.MapPost("/api/serial/open", (SerialPortManager mgr, IConfiguration config, OpenPortRequest req) =>
+        app.MapPost("/api/serial/open", async (HttpContext context, SerialPortManager mgr, IConfiguration config) =>
         {
             try
             {
+                OpenPortRequest req;
+                try
+                {
+                    req = await context.Request.ReadFromJsonAsync<OpenPortRequest>()
+                          ?? new OpenPortRequest(string.Empty);
+                }
+                catch (JsonException)
+                {
+                    return Results.BadRequest(new { success = false, message = "请求体不是有效的 JSON 格式" });
+                }
+
+                if (string.IsNullOrWhiteSpace(req.PortName))
+                    return Results.BadRequest(new { success = false, message = "缺少 portName 参数" });
+
                 var defaultBaudRate = config.GetValue<int>("SerialPort:DefaultBaudRate", 9600);
                 var readTimeout = config.GetValue<int>("SerialPort:ReadTimeoutMs", 500);
                 var writeTimeout = config.GetValue<int>("SerialPort:WriteTimeoutMs", 500);

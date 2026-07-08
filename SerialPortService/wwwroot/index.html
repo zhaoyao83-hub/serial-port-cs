@@ -80,6 +80,20 @@
             color: var(--text-dim);
         }
 
+        .debug-link {
+            font-size: 13px;
+            color: var(--accent);
+            text-decoration: none;
+            padding: 4px 14px;
+            border: 1px solid var(--accent);
+            border-radius: 6px;
+            transition: all .2s;
+        }
+        .debug-link:hover {
+            background: var(--accent);
+            color: #000;
+        }
+
         .grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -322,6 +336,7 @@
         <span style="flex:1"></span>
         <span class="status-text">端口: 9600</span>
         <span class="status-text" id="clientCount">客户端: 0</span>
+        <a href="/serial-debug.html" class="debug-link" title="打开串口调试工具">🔧 调试工具</a>
     </div>
 
     <!-- 主面板 -->
@@ -343,6 +358,7 @@
         <div class="panel">
             <div class="panel-header">
                 <span>⚙️ 串口操作</span>
+                <span id="portOpenStatus" style="font-size:11px;color:var(--text-dim);">未打开</span>
             </div>
             <div class="panel-body">
                 <div class="form-row">
@@ -354,7 +370,13 @@
                 <div class="form-row">
                     <label>波特率</label>
                     <select id="baudRate">
+                        <option value="300">300</option>
+                        <option value="600">600</option>
+                        <option value="1200">1200</option>
+                        <option value="2400">2400</option>
+                        <option value="4800">4800</option>
                         <option value="9600" selected>9600</option>
+                        <option value="14400">14400</option>
                         <option value="19200">19200</option>
                         <option value="38400">38400</option>
                         <option value="57600">57600</option>
@@ -376,6 +398,21 @@
                         <input type="checkbox" id="hexMode">
                         <span>HEX 模式 (如: A55A0102)</span>
                     </label>
+                </div>
+
+                <div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--border);">
+                    <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px; font-weight:600;">📥 接收控制</div>
+                    <div style="display:flex; gap:6px; margin-bottom:8px; flex-wrap:wrap;">
+                        <button class="btn btn-sm" onclick="receiveOnceIdx()" style="color:var(--green);border-color:var(--green);">接收一次</button>
+                        <button class="btn btn-sm" id="btnPollingIdx" onclick="togglePollingIdx()">▶ HTTP 轮询</button>
+                        <button class="btn btn-sm" id="btnWsReceiveIdx" onclick="toggleWsReceiveIdx()" style="color:var(--accent);border-color:var(--accent);">● WebSocket</button>
+                    </div>
+                    <div class="form-row" id="pollOptsIdx" style="display:none;">
+                        <label>间隔</label>
+                        <input type="number" id="pollIntervalIdx" value="200" min="50" max="5000" step="50" style="width:70px;">
+                        <span style="font-size:11px;color:var(--text-dim);">ms</span>
+                    </div>
+                    <div id="receiveStatusIdx" style="font-size:11px;color:var(--text-dim);margin-top:4px;">接收: 空闲</div>
                 </div>
             </div>
         </div>
@@ -462,7 +499,13 @@
                     } else if (data.type === 'broadcast') {
                         appendWsLog('info', `[广播] ${data.message}`);
                     } else if (data.type === 'serial-data') {
-                        appendSerialLog('recv', data.portName, data.data);
+                        // 实时串口数据 — base64 解码
+                        const decoded = atob(data.data);
+                        appendSerialLog('recv', data.portName, decoded, data.hex, data.byteCount);
+                    } else if (data.type === 'subscribed' || data.type === 'unsubscribed') {
+                        appendWsLog('info', data.message);
+                    } else if (data.type === 'error') {
+                        appendWsLog('error', data.message);
                     } else {
                         appendWsLog('recv', JSON.stringify(data));
                     }
@@ -548,19 +591,42 @@
                 baudRate: baud
             });
 
-            appendSerialLog(status === 200 ? 'info' : 'error', port,
-                status === 200 ? '打开成功' : (data.message || '打开失败'));
+            if (status === 200) {
+                portOpenedIdx = true;
+                openedPortName = port;
+                document.getElementById('portOpenStatus').textContent = `${port} 已连接`;
+                document.getElementById('portOpenStatus').style.color = 'var(--green)';
+                appendSerialLog('info', port, `打开成功 (${baud}bps)`);
+                // 若 WebSocket 接收已开启，自动订阅
+                if (wsReceiveActiveIdx && ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ action: 'subscribe', port: port }));
+                }
+            } else {
+                appendSerialLog('error', port, data.message || '打开失败');
+            }
             refreshPorts();
         }
 
         async function closePort() {
-            const port = document.getElementById('targetPort').value;
+            const port = document.getElementById('targetPort').value || openedPortName;
             if (!port) { alert('请选择串口'); return; }
+
+            // 停止轮询
+            if (pollTimerIdx) stopPollingIdx();
+            // 取消 WebSocket 订阅
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: 'unsubscribe', port: port }));
+            }
 
             const { status, data } = await api('POST', '/api/serial/close', {
                 portName: port
             });
 
+            portOpenedIdx = false;
+            openedPortName = '';
+            document.getElementById('portOpenStatus').textContent = '未打开';
+            document.getElementById('portOpenStatus').style.color = 'var(--text-dim)';
+            updateReceiveStatusIdx();
             appendSerialLog(status === 200 ? 'info' : 'error', port,
                 status === 200 ? '已关闭' : (data.message || '关闭失败'));
             refreshPorts();
@@ -607,12 +673,14 @@
             el.scrollTop = el.scrollHeight;
         }
 
-        function appendSerialLog(type, port, msg) {
+        function appendSerialLog(type, port, msg, hex, byteCount) {
             const el = document.getElementById('serialLog');
             if (el.querySelector('.empty-state')) el.innerHTML = '';
             const time = new Date().toLocaleTimeString();
+            let hexPart = hex ? ` <span class="log-hex" style="color:var(--yellow);font-size:10px;">[${hex}]</span>` : '';
+            let byteInfo = byteCount !== undefined ? ` <span style="font-size:10px;color:var(--text-dim);">(${byteCount}B)</span>` : '';
             el.innerHTML +=
-                `<div class="log-line"><span class="log-time">${time}</span><span style="color:var(--accent)">[${port}]</span> <span class="log-${type}">${escapeHtml(msg)}</span></div>`;
+                `<div class="log-line"><span class="log-time">${time}</span><span style="color:var(--accent)">[${port}]</span> <span class="log-${type}">${escapeHtml(msg)}</span>${hexPart}${byteInfo}</div>`;
             el.scrollTop = el.scrollHeight;
         }
 
@@ -626,6 +694,107 @@
             const div = document.createElement('div');
             div.textContent = s;
             return div.innerHTML;
+        }
+
+        // ---- 接收控制 ----
+        let pollTimerIdx = null;
+        let wsReceiveActiveIdx = false;
+        let portOpenedIdx = false;
+        let openedPortName = '';
+
+        // 一次性接收
+        async function receiveOnceIdx() {
+            if (!portOpenedIdx || !openedPortName) { alert('请先打开串口'); return; }
+            try {
+                const { status, data } = await api('GET', `/api/serial/read?portName=${encodeURIComponent(openedPortName)}`);
+                if (status === 200 && data.success && data.byteCount > 0) {
+                    const decoded = atob(data.data);
+                    appendSerialLog('recv', openedPortName, decoded, data.hex, data.byteCount);
+                } else if (status === 200 && data.success) {
+                    appendSerialLog('info', openedPortName, '缓冲区暂无数据');
+                } else {
+                    appendSerialLog('error', openedPortName, data.message || '读取失败');
+                }
+            } catch (e) {
+                appendSerialLog('error', openedPortName, '接收异常: ' + e.message);
+            }
+        }
+
+        // HTTP 轮询
+        function togglePollingIdx() {
+            if (pollTimerIdx) {
+                stopPollingIdx();
+                return;
+            }
+            if (!portOpenedIdx || !openedPortName) { alert('请先打开串口'); return; }
+            startPollingIdx();
+        }
+
+        function startPollingIdx() {
+            const interval = parseInt(document.getElementById('pollIntervalIdx').value) || 200;
+            pollTimerIdx = setInterval(pollOnceIdx, interval);
+            document.getElementById('btnPollingIdx').textContent = '⏸ 停止轮询';
+            document.getElementById('btnPollingIdx').style.color = 'var(--red)';
+            document.getElementById('btnPollingIdx').style.borderColor = 'var(--red)';
+            document.getElementById('pollOptsIdx').style.display = '';
+            updateReceiveStatusIdx();
+            appendSerialLog('info', openedPortName, `HTTP 轮询已启动 (${interval}ms)`);
+        }
+
+        function stopPollingIdx() {
+            if (pollTimerIdx) { clearInterval(pollTimerIdx); pollTimerIdx = null; }
+            const btn = document.getElementById('btnPollingIdx');
+            btn.textContent = '▶ HTTP 轮询';
+            btn.style.color = '';
+            btn.style.borderColor = '';
+            document.getElementById('pollOptsIdx').style.display = 'none';
+            updateReceiveStatusIdx();
+            appendSerialLog('info', openedPortName, 'HTTP 轮询已停止');
+        }
+
+        async function pollOnceIdx() {
+            if (!portOpenedIdx || !openedPortName) { stopPollingIdx(); return; }
+            try {
+                const { status, data } = await api('GET', `/api/serial/read?portName=${encodeURIComponent(openedPortName)}`);
+                if (status === 200 && data.success && data.byteCount > 0) {
+                    const decoded = atob(data.data);
+                    appendSerialLog('recv', openedPortName, decoded, data.hex, data.byteCount);
+                }
+            } catch { /* 忽略轮询错误 */ }
+        }
+
+        // WebSocket 实时接收
+        function toggleWsReceiveIdx() {
+            if (!portOpenedIdx || !openedPortName) { alert('请先打开串口'); return; }
+            if (!ws || ws.readyState !== WebSocket.OPEN) { alert('WebSocket 未连接'); return; }
+
+            if (wsReceiveActiveIdx) {
+                ws.send(JSON.stringify({ action: 'unsubscribe', port: openedPortName }));
+                wsReceiveActiveIdx = false;
+                appendSerialLog('info', openedPortName, '已取消 WebSocket 订阅');
+            } else {
+                ws.send(JSON.stringify({ action: 'subscribe', port: openedPortName }));
+                wsReceiveActiveIdx = true;
+                appendSerialLog('info', openedPortName, '已启用 WebSocket 实时接收');
+            }
+            updateReceiveStatusIdx();
+        }
+
+        function updateReceiveStatusIdx() {
+            const el = document.getElementById('receiveStatusIdx');
+            const wsBtn = document.getElementById('btnWsReceiveIdx');
+            if (pollTimerIdx && wsReceiveActiveIdx) {
+                el.textContent = '接收: 轮询 + WebSocket';
+            } else if (pollTimerIdx) {
+                el.textContent = '接收: HTTP 轮询中';
+            } else if (wsReceiveActiveIdx) {
+                el.textContent = '接收: WebSocket 实时';
+            } else {
+                el.textContent = '接收: 空闲';
+            }
+            wsBtn.textContent = wsReceiveActiveIdx ? '● WebSocket 接收中' : '● WebSocket';
+            wsBtn.style.color = wsReceiveActiveIdx ? 'var(--green)' : 'var(--accent)';
+            wsBtn.style.borderColor = wsReceiveActiveIdx ? 'var(--green)' : 'var(--accent)';
         }
 
         // ---- 初始化 ----
